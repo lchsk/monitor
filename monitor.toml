@@ -1,0 +1,12 @@
+[account]
+server=""
+port=587
+email=""
+password=""
+
+[alert]
+email = ""
+
+[ssl_check]
+hosts = ["host:443"]
+days_before_warning = 7
