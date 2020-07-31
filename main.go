@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/lchsk/scheduler"
 )
 
 type Config struct {
@@ -55,8 +56,37 @@ func SendEmail(sender Account, email Email) {
 	}
 }
 
+func CheckSSL(conf *Config) {
+	for _, host := range conf.SSLCheck.Hosts {
+		fmt.Printf("Checking SSL for %s\n", host)
+
+		conn2, _ := tls.Dial("tcp", host, &tls.Config{})
+
+		now := time.Now()
+
+		for _, chain := range conn2.ConnectionState().VerifiedChains {
+			for _, cert := range chain {
+				if now.AddDate(0, 0, conf.SSLCheck.DaysBeforeWarning).After(cert.NotAfter) {
+					fmt.Printf("=== SSL expires soon, expires: %v ===\n", cert.NotAfter)
+
+					email := Email{
+						To:      conf.Alert.Email,
+						Subject: fmt.Sprintf("SSL Certificate for %s expires soon - %v", host, cert.NotAfter),
+						Body:    "",
+					}
+
+					SendEmail(conf.Account, email)
+				} else {
+					fmt.Printf("SSL ok, expires: %v\n", cert.NotAfter)
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	flagTestEmail := flag.Bool("test-email", false, "Send test email")
+	flagCheckSSL := flag.Bool("check-ssl", false, "Run SSL check")
 	flag.Parse()
 
 	configPath := filepath.Join("./monitor.toml")
@@ -83,29 +113,15 @@ func main() {
 		SendEmail(conf.Account, email)
 	}
 
-	for _, host := range conf.SSLCheck.Hosts {
-		fmt.Printf("Checking SSL for %s\n", host)
-
-		conn2, _ := tls.Dial("tcp", host, &tls.Config{})
-
-		now := time.Now()
-
-		for _, chain := range conn2.ConnectionState().VerifiedChains {
-			for _, cert := range chain {
-				if now.AddDate(0, 0, conf.SSLCheck.DaysBeforeWarning).After(cert.NotAfter) {
-					fmt.Printf("=== SSL expires soon, expires: %v ===\n", cert.NotAfter)
-
-					email := Email{
-						To:      conf.Alert.Email,
-						Subject: fmt.Sprintf("SSL Certificate for %s expires soon - %v", host, cert.NotAfter),
-						Body:    "",
-					}
-
-					SendEmail(conf.Account, email)
-				} else {
-					fmt.Printf("SSL ok, expires: %v\n", cert.NotAfter)
-				}
-			}
-		}
+	if *flagCheckSSL {
+		CheckSSL(conf)
 	}
+
+	mgr := scheduler.Scheduler{}
+	mgr.Schedule(24*time.Hour, func() {
+		fmt.Printf("Now: %v\n", time.Now())
+		CheckSSL(conf)
+	})
+
+	mgr.Wait()
 }
